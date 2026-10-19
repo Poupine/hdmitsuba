@@ -27,6 +27,7 @@ import os
 import mitsuba as mi
 import numpy as np
 
+from pxr import Ar
 from pxr import Gf
 from pxr import Sdf
 from pxr import Tf
@@ -122,6 +123,18 @@ def find_shader(
   return UsdShade.Shader(attributes[0].GetPrim()) if attributes else None
 
 
+def _get_volume_shader(
+    material: UsdShade.Material,
+) -> UsdShade.Shader | None:
+  """Gets the Mitsuba-specific volume shader or falls back to default."""
+  shader = find_shader(material.GetVolumeOutput('mitsuba')) or find_shader(
+      material.GetVolumeOutput()
+  )
+  if shader is not None and shader.GetShaderId().startswith(_MI_PREFIX):
+    return shader
+  return None
+
+
 def _convert_uv_texture(
     shader: UsdShade.Shader,
     input_name: str | None = None,
@@ -182,10 +195,10 @@ def usd_mitsuba_material_to_dict(
     if shader_id == 'UsdUVTexture':
       return _convert_uv_texture(shader, input_name)
 
-    if not shader_id.startswith('mitsuba_'):
+    if not shader_id.startswith(_MI_PREFIX):
       raise ValueError(f'The shader {shader_id} is not a Mitsuba shader.')
 
-    result = {'type': shader_id.replace('mitsuba_', '', 1)}
+    result = {'type': shader_id.removeprefix(_MI_PREFIX)}
     for usd_input in shader.GetInputs():
       name = usd_input.GetBaseName()
       if connected_shader := find_shader(usd_input):
@@ -212,6 +225,20 @@ def usd_mitsuba_material_to_dict(
             result[name] = resolved if resolved else value.path
           else:
             result[name] = value
+
+    if (
+        result['type'] == 'gridvolume'
+        and 'filename' in result
+        and 'grid' not in result
+        and not os.path.exists(result['filename'])
+    ):
+      asset = Ar.GetResolver().OpenAsset(Ar.ResolvedPath(result['filename']))
+      if asset is not None and (buffer := asset.GetBuffer()) is not None:
+        stream = mi.MemoryStream(asset.GetSize())
+        stream.write(buffer)
+        stream.seek(0)
+        result['grid'] = mi.VolumeGrid(stream)
+        del result['filename']
 
     return result
 
@@ -316,7 +343,9 @@ def has_displacement(prim: Usd.Prim) -> bool:
 
 def convert_material(
     prim: Usd.Prim,
-) -> tuple[mi.BSDF | None, mi.Emitter | None, mi.Texture | None]:
+) -> tuple[
+    mi.BSDF | None, mi.Emitter | None, mi.Texture | None, mi.Medium | None
+]:
   """Parses a USD geometry prim and returns Mitsuba material properties.
 
   This function will use the Mitsuba material variant if available, and
@@ -329,11 +358,11 @@ def convert_material(
     prim: The USD prim to extract the material from.
 
   Returns:
-    A tuple of the Mitsuba BSDF, emitter and displacement texture (each may
-    be None if not found).
+    A tuple of the Mitsuba BSDF, emitter, displacement texture, and interior
+    medium (each may be None if not found).
   """
 
-  bsdf, emitter, displacement = None, None, None
+  bsdf, emitter, displacement, interior_medium = None, None, None, None
   material, _ = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
   if material:
     if shader := find_shader(_get_surface_output(material)):
@@ -341,9 +370,21 @@ def convert_material(
         bsdf_dict, emitter_dict = usd_preview_surface_to_mitsuba(shader)
         bsdf = mi.load_dict(bsdf_dict)
         emitter = mi.load_dict(emitter_dict) if emitter_dict else None
-      elif shader.GetShaderId().startswith('mitsuba_'):
+      elif shader.GetShaderId().startswith(_MI_PREFIX):
         bsdf_dict = usd_mitsuba_material_to_dict(shader)
         bsdf = mi.load_dict(bsdf_dict)
+
+    if shader := _get_volume_shader(material):
+      medium_dict = usd_mitsuba_material_to_dict(shader, 'volume')
+      medium = mi.load_dict(medium_dict)
+      if not isinstance(medium, mi.Medium):
+        raise ValueError(
+            'Volume shader is not a Mitsuba medium. Please use a Mitsuba'
+            ' medium.'
+        )
+      interior_medium = medium
+      if bsdf is None:
+        bsdf = mi.load_dict({'type': 'null'})
 
     if shader := find_shader(_get_displacement_output(material)):
       bsdf_dict = usd_mitsuba_material_to_dict(shader, 'displacement')
@@ -364,4 +405,5 @@ def convert_material(
           },
       })
 
-  return bsdf, emitter, displacement
+  return bsdf, emitter, displacement, interior_medium
+

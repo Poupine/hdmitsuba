@@ -34,7 +34,15 @@ def _set_mitsuba_variant():
 
 @pytest.mark.parametrize(
     'scene_name',
-    ['materials', 'checkerboard', 'normalmap', 'nodegraphs', 'display_color', 'mitsuba_bitmap']
+    [
+        'materials',
+        'checkerboard',
+        'normalmap',
+        'nodegraphs',
+        'display_color',
+        'mitsuba_bitmap',
+        'volumes',
+    ],
 )
 def test_render(scene_name: str):
   stage = Usd.Stage.Open(
@@ -140,3 +148,4 @@ def test_modify_material():
   diffuse_color.GetAttr().Clear()
   image_reset = engine.render()['color']
   test_helpers.robust_assert_close(image_reset, image_original, atol=0.05)
+
