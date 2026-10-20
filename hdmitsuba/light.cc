@@ -75,8 +75,11 @@ LightParams ReadLightParams(const HdContainerDataSourceHandle& container) {
   p.width = GetParam<float>(container, HdLightTokens->width, 1.0f);
   p.height = GetParam<float>(container, HdLightTokens->height, 1.0f);
   p.normalize = GetParam<bool>(container, HdLightTokens->normalize, false);
+  // `treatAsPoint` always has a value (its schema fallback is false), so
+  // zero-radius spheres must be checked explicitly.
   p.treat_as_point =
-      GetParam<bool>(container, treat_as_point_token, p.radius == 0.0f);
+      GetParam<bool>(container, treat_as_point_token, false) ||
+      p.radius == 0.0f;
   p.angle = GetParam<float>(container, HdLightTokens->angle, 0.0f);
   p.shaping_cone_angle =
       GetParam<float>(container, HdLightTokens->shapingConeAngle, 0.0f);
@@ -122,11 +125,25 @@ ScalarAffineTransform4f ComputeLightTransform(const TfToken& type_id,
   return to_world;
 }
 
+// World-space area of a light-space disk of radius `radius`.
+double DiskArea(const GfMatrix4d& transform, float radius) {
+  return drjit::Pi<double> *
+         transform.TransformDir(GfVec3d(radius, 0, 0)).GetLengthSq();
+}
+
 GfVec3f ComputeLightEmission(const TfToken& type_id,
                              const GfMatrix4d& transform,
                              const LightParams& params) {
   GfVec3f emission = params.BaseEmission();
   if (!params.normalize) {
+    // A point light stands in for its sphere. A sphere of radius r and radiance
+    // L has radiant intensity L * pi * r^2 in every direction, pi * r^2 being
+    // its projected area: a disk of radius r. Zero-radius lights keep
+    // `intensity` as radiant intensity.
+    if (type_id == HdPrimTypeTokens->sphereLight && params.treat_as_point &&
+        params.radius > 0.0f) {
+      emission *= DiskArea(transform, params.radius);
+    }
     return emission;
   }
   if (type_id == HdPrimTypeTokens->rectLight) {
@@ -135,15 +152,13 @@ GfVec3f ComputeLightEmission(const TfToken& type_id,
     double area = GfCross(w_vec, h_vec).GetLength();
     if (area > 0.0) emission /= area;
   } else if (type_id == HdPrimTypeTokens->diskLight) {
-    GfVec3d r_vec = transform.TransformDir(GfVec3d(params.radius, 0, 0));
-    double area = drjit::Pi<double> * r_vec.GetLengthSq();
+    double area = DiskArea(transform, params.radius);
     if (area > 0.0) emission /= area;
   } else if (type_id == HdPrimTypeTokens->sphereLight) {
     if (params.treat_as_point) {
       emission *= 0.25f;  // Match Mitsuba's point light normalization (1/4)
     } else {
-      GfVec3d r_vec = transform.TransformDir(GfVec3d(params.radius, 0, 0));
-      double area = 4.0 * drjit::Pi<double> * r_vec.GetLengthSq();
+      double area = 4.0 * DiskArea(transform, params.radius);
       if (area > 0.0) emission /= area;
     }
   }
@@ -209,9 +224,12 @@ void HdMitsubaLight::Sync(HdSceneDelegate* sceneDelegate,
   spec.transform = world_transform.Map([&](const GfMatrix4d& m) {
     return ComputeLightTransform(type_id_, m, params);
   });
-  // Area lights cannot be animated, so using First() is exact.
-  spec.emission =
-      ComputeLightEmission(type_id_, world_transform.First(), params);
+  // Point lights may be animated, so use the transform at frame time for their
+  // radius.
+  const GfMatrix4d emission_transform = world_transform.IsAnimated()
+                                            ? GetPrimTransform(data_source)
+                                            : world_transform.First();
+  spec.emission = ComputeLightEmission(type_id_, emission_transform, params);
 
   const RebuildKey rebuild_key{
       params.treat_as_point, params.angle > 0.0f,

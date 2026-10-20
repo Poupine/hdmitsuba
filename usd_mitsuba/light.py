@@ -106,6 +106,14 @@ def _convert_sphere_light(
   if _is_point_light(sphere_light, time):
     if normalize:
       color *= 0.25
+    elif radius > 0:
+      # A point light stands in for its sphere, whose radiant intensity is
+      # L * pi * r^2. Zero-radius lights keep `intensity` as radiant intensity.
+      # `world_transform` has its scale removed, so use the prim's.
+      radius_vec = util.get_world_transform(prim, time) @ mi.ScalarVector3f(
+          radius, 0, 0
+      )
+      color *= dr.pi * dr.squared_norm(radius_vec)
     emitter_dict: dict[str, Any] = {
         'type': 'point',
         'to_world': world_transform,

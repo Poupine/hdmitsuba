@@ -118,6 +118,8 @@ def test_dome_light_corrupt_texture_falls_back_to_constant():
         'mesh',
         'mesh_light_api',
         'point',
+        'point_unnormalized',
+        'point_zero_radius',
         'sphere',
         'spot',
         'textured_light',
