@@ -131,18 +131,30 @@ def test_dome_light_textured_1x1():
   assert emitter is not None
 
 
-def test_sphere_light_point():
+@pytest.mark.parametrize(
+    'radius, scale, expected_intensity',
+    [
+        (0.0, 2.0, 10.0),
+        (0.1, 1.0, 10.0 * np.pi * 0.1**2),
+        (0.1, 2.0, 10.0 * np.pi * 0.2**2),
+    ],
+)
+def test_sphere_light_point(radius, scale, expected_intensity):
   stage, prim = _create_stage_with_light(UsdLux.SphereLight)
   usd_light = UsdLux.SphereLight(prim)
+  usd_light.AddScaleOp().Set(Gf.Vec3f(scale))
   usd_light.GetColorAttr().Set(Gf.Vec3f(1.0, 1.0, 1.0))
   usd_light.GetIntensityAttr().Set(10.0)
-  usd_light.GetRadiusAttr().Set(0.0)
+  usd_light.GetRadiusAttr().Set(radius)
+  usd_light.GetTreatAsPointAttr().Set(True)
 
   emitter_dict = light.convert_light(prim)
 
   assert emitter_dict['type'] == 'point'
   np.testing.assert_allclose(
-      emitter_dict['intensity']['value'], mi.ScalarColor3f(10.0, 10.0, 10.0)
+      emitter_dict['intensity']['value'],
+      mi.ScalarColor3f(expected_intensity),
+      rtol=1e-6,
   )
 
 
