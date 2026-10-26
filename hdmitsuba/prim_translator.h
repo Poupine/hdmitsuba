@@ -115,6 +115,10 @@ class PrimTranslator {
   static mitsuba::ref<mitsuba::Object> CreateAreaEmitter(
       const GfVec3f& emission);
 
+  // Updates the radiance of an emitter created by `CreateAreaEmitter`.
+  static void UpdateMeshEmitterInPlace(
+      mitsuba::Emitter<Float, Spectrum>* emitter, const GfVec3f& emission);
+
   static void UpdateLightInPlace(mitsuba::Object* light_obj,
                                  const LightSpec& spec);
 

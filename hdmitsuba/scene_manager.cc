@@ -1120,15 +1120,8 @@ class SceneModel final : public SceneManager {
     if (key_prefix.empty() && spec.dirty_bits != 0 && shape->is_emitter() &&
         spec.emitter_spec.has_value()) {
       // Update emissive mesh radiance in-place
-      auto* emitter = shape->emitter();
-      TraversalCallback cb_emitter;
-      emitter->traverse(&cb_emitter);
-      using Color3f = mitsuba::Color<Float, 3>;
-      cb_emitter.set<Color3f>("radiance.value",
-                              Color3f(spec.emitter_spec->emission[0],
-                                      spec.emitter_spec->emission[1],
-                                      spec.emitter_spec->emission[2]));
-      emitter->parameters_changed();
+      PrimTranslator::UpdateMeshEmitterInPlace(shape->emitter(),
+                                               spec.emitter_spec->emission);
     }
     shape->set_bsdf(bsdf.get());
   }

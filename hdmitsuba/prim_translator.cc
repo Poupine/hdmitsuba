@@ -647,6 +647,16 @@ PrimTranslator<Float, Spectrum>::CreateAreaEmitter(const GfVec3f& emission) {
       mitsuba::Emitter<Float, Spectrum>::Type);
 }
 
+MI_VARIANT void PrimTranslator<Float, Spectrum>::UpdateMeshEmitterInPlace(
+    mitsuba::Emitter<Float, Spectrum>* emitter, const GfVec3f& emission) {
+  using Color3f = mitsuba::Color<Float, 3>;
+  TraversalCallback cb;
+  emitter->traverse(&cb);
+  cb.set<Color3f>("radiance.value",
+                  Color3f(emission[0], emission[1], emission[2]));
+  emitter->parameters_changed();
+}
+
 MI_VARIANT mitsuba::Properties
 PrimTranslator<Float, Spectrum>::BuildLightProperties(const LightSpec& spec) {
   mitsuba::Color<float, 3> color(spec.emission[0], spec.emission[1],
